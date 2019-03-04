@@ -1,5 +1,5 @@
 {
-  "name": "LedController",
+  "name": "led-controller",
   "version": "0.1.0",
   "description": "A simple led controller for Raspberry Pi using Blynk",
   "main": "ledController.js",
@@ -9,6 +9,7 @@
   "author": "Joonatan Kallio",
   "license": "MIT",
   "dependencies": {
+    "blynk-library": "^0.5.4",
     "raspi": "^6.0.0",
     "raspi-soft-pwm": "^5.1.0"
   }

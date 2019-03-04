@@ -1,12 +1,8 @@
 const colors = require('./colors');
+const debug = require('./debug');
 
-const DEBUG = true;
+debug.isDebug = true;
 
-function debug(message, ...optionalParams) {
-    if (DEBUG) {
-        console.log("DEBUG: " + message, ...optionalParams);
-    }
-}
 
 /**
  * An object that holds and modifies the state of the Blynk table widget. This
@@ -20,6 +16,8 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
     this.vPinHue = vPinHue;
     this.vPinSaturation = vPinSat;
     this.vPinValue = vPinVal;
+
+    this.updateCurrentRowListeners = [];
 
     this.nextId = 1;
 
@@ -38,22 +36,22 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
         switch (cmd) {
             case "select":
                 let rowIdSel = parseInt(param[1], 10);
-                this.selectRow(rowIdSel);
+                this.onSelectWidgetRow(rowIdSel);
 
-                debug("Row selected: " + rowIdSel);
+                debug.d("Row selected: " + rowIdSel);
                 break;
             case "deselect":
                 let rowIdDesel = parseInt(param[1], 10);
-                this.deselectRow(rowIdDesel);
+                this.onDeselectWidgetRow(rowIdDesel);
 
-                debug("Row deselected: " + rowIdDesel);
+                debug.d("Row deselected: " + rowIdDesel);
                 break;
             case "order":
                 let oldRowIndex = parseInt(param[1], 10);
                 let newRowIndex = parseInt(param[2], 10);
-                this.changeRowOrder(oldRowIndex, newRowIndex);
+                this.onChangeWidgetRowOrder(oldRowIndex, newRowIndex);
 
-                debug("Row order changed. oldIndex: " + oldRowIndex + ", newIndex: " + newRowIndex);
+                debug.d("Row order changed. oldIndex: " + oldRowIndex + ", newIndex: " + newRowIndex);
                 break;
         }
     });
@@ -63,8 +61,9 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
      *
      * @param rowId the id of the row to add.
      */
-    this.selectRow = (rowId) => {
-        this.state.selectedRowIds.add(rowId);
+    this.onSelectWidgetRow = (rowId) => {
+        this.selectRowId(rowId);
+
         this.updateCurrentRow();
     };
 
@@ -73,8 +72,8 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
      *
      * @param rowId the id of the row to remove.
      */
-    this.deselectRow = (rowId) => {
-        this.state.selectedRowIds.delete(rowId);
+    this.onDeselectWidgetRow = (rowId) => {
+        // this.state.selectedRowIds.delete(rowId);
         this.updateCurrentRow();
     };
 
@@ -84,7 +83,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
      * @param oldRowIndex the index from which to move.
      * @param newRowIndex the destination index.
      */
-    this.changeRowOrder = (oldRowIndex, newRowIndex) => {
+    this.onChangeWidgetRowOrder = (oldRowIndex, newRowIndex) => {
         let row = this.state.table[oldRowIndex];
         this.state.table.splice(newRowIndex, 0, row);
         if (oldRowIndex < newRowIndex) { // Remove the old row.
@@ -96,7 +95,22 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
 
         this.updateCurrentRow();
 
-        debug(JSON.stringify(this.state));
+        debug.d("State: " + JSON.stringify(this.state));
+    };
+
+    /**
+     * Adds the given row id to selected rows and deselects all others.
+     *
+     * NOTE: You need to call updateCurrentRow after this to get the row
+     * actually selected.
+     */
+    this.selectRowId = (rowId) => {
+        this.state.selectedRowIds.forEach(id => {
+            this.table.deselect_row(id);
+            this.state.selectedRowIds.delete(id);
+        });
+        this.table.select_row(rowId);
+        this.state.selectedRowIds.add(rowId);
     };
 
     /**
@@ -121,16 +135,51 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
             this.state.currentRowId = this.state.table[0].id;
         }
 
-        let hsv = this.getCurrentHsv();
+        this.onUpdateCurrentRow(this.state.table.find(item => item.id === this.state.currentRowId));
+
+        debug.d("HSV values written: " + JSON.stringify(this.getCurrentHsv()));
+    };
+
+    /**
+     * A handler that's called whenever the current row gets updated.
+     * @param newCurrentRow
+     */
+    this.onUpdateCurrentRow = (newCurrentRow) => {
+        let hsv = newCurrentRow.hsv;
         this.vPinHue.write(hsv.h);
         this.vPinSaturation.write(hsv.s);
         this.vPinValue.write(hsv.v);
         this.setSliderColors(hsv);
 
-        this.table.highlight_row(this.state.currentRowId);
-        this.updateRowToTableWidget(this.state.currentRowId, hsv);
+        this.selectRowId(newCurrentRow.id);
+        this.updateRowOnTableWidget(newCurrentRow.id, hsv);
 
-        debug("HSV values written: " + JSON.stringify(this.getCurrentHsv()));
+        for (let listener of this.updateCurrentRowListeners) {
+            listener(newCurrentRow.hsv);
+        }
+    };
+
+    /**
+     * Adds a listener that'll be called, whenever the currently selected row
+     * gets updated.
+     *
+     * @param listener the listener to add.
+     */
+    this.addUpdateCurrentRowListener = (listener) => {
+        this.updateCurrentRowListeners.push(listener);
+
+        this.updateCurrentRow();
+    };
+
+    /**
+     * Removes a listener that would be called, whenever the currently selected
+     * row gets updated.
+     *
+     * @param listener the listener to remove.
+     */
+    this.removeUpdateCurrentRowListener = (listener) => {
+        let index = this.updateCurrentRowListeners.findIndex(l => l === listener);
+        this.updateCurrentRowListeners.splice(index, 1);
     };
 
     /**
@@ -143,7 +192,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
         let satColor = colors.hsvToRgb(hsv.h, hsv.s, 1);
         // vPinHue.write("color", rgbToHexString(rgb.r, rgb.g, rgb.b));
         // let hueColor = rgbToHexString(rgb.r, rgb.g, rgb.b);
-        // debug(hueColor);
+        // debug.d(hueColor);
         blynk.setProperty(this.vPinHue.pin, "color", colors.rgbToHexString(hueColor.r, hueColor.g, hueColor.b));
         blynk.setProperty(this.vPinSaturation.pin, "color", colors.rgbToHexString(satColor.r, satColor.g, satColor.b));
         blynk.setProperty(this.vPinValue.pin, "color", colors.rgbToHexString(hsv.v, hsv.v, hsv.v));
@@ -157,7 +206,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
      * @returns {hsv|{h, s, v}} The HSV to return.
      */
     this.getCurrentHsv = () => {
-        debug("getCurrentHsv: ", this.state);
+        debug.d("getCurrentHsv - State: " + JSON.stringify(this.state));
         return this.state.table.find(item => item.id === this.state.currentRowId).hsv;
     };
 
@@ -205,7 +254,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
         this.state.table.splice(0, this.state.table.length);
         this.table.clear();
 
-        debug("Table cleared");
+        debug.d("Table cleared");
 
         this.addRow();
     };
@@ -231,12 +280,13 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
 
         let hsv = newRow.hsv;
         this.addRowToTableWidget(newRow.id, hsv);
-        this.table.select_row(newRow.id);
-        this.state.selectedRowIds.add(newRow.id);
+        this.onSelectWidgetRow(newRow.id);
+        // this.table.select_row(newRow.id);
+        // this.state.selectedRowIds.add(newRow.id);
 
         this.updateCurrentRow();
 
-        debug(JSON.stringify(this.state));
+        debug.d("State: " + JSON.stringify(this.state));
     };
 
     /**
@@ -246,7 +296,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
         let indexesOfRowsToRemove = Array.from(this.state.selectedRowIds)
             .map(rowId => this.state.table.findIndex(item => item.id === rowId));
         indexesOfRowsToRemove.sort((a, b) => b - a); // Sort into reverse order
-        debug("Remove rows at indexes: " + indexesOfRowsToRemove.join(", "));
+        debug.d("Remove rows at indexes: " + indexesOfRowsToRemove.join(", "));
 
         if (indexesOfRowsToRemove.length === 0) {
             return;
@@ -271,7 +321,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
 
         this.updateCurrentRow();
 
-        debug("Selected rows removed");
+        debug.d("Selected rows removed");
     };
 
     /**
@@ -300,7 +350,7 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
      * @param id the id of the row to update.
      * @param hsv the new HSV color value to update to.
      */
-    this.updateRowToTableWidget = (id, hsv) => {
+    this.updateRowOnTableWidget = (id, hsv) => {
         this.table.update_row(id, "", this.getHsvColorString(hsv));
     };
 
