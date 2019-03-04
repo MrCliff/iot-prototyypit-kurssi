@@ -1,20 +1,13 @@
 const config = require('./config');
 const Blynk = require('blynk-library');
-const raspi = require('raspi');
-const pwm = require('raspi-soft-pwm');
+const Worker = require('tiny-worker');
 const Table = require('./components/table');
 const colors = require('./components/colors');
-const debug = require('./components/debug');
+const ledMessages = require('./components/ledMessages');
+const Debug = require('./components/debug');
 
-debug.isDebug = true;
-
-const GPIO_RED = 'GPIO4';
-const GPIO_GREEN = 'GPIO5';
-const GPIO_BLUE = 'GPIO6';
-
-// const MAX_PWM_VALUE = 255;
-// const MIN_PWM_VALUE = 0;
-const PWM_FREQ = 100;
+const debug = new Debug();
+debug.isDebug = false;
 
 let blynk = new Blynk.Blynk(config.AUTH);
 
@@ -36,81 +29,67 @@ blynk.on('connect', () => {
         let rgb = colors.hsvToRgb(hsv.h, hsv.s, hsv.v);
         blynk.setProperty(vWidgetColorLed.pin, "color", colors.rgbToHexString(rgb.r, rgb.g, rgb.b));
     });
-
     vWidgetColorLed.turnOn();
 
 
-    // GPIO pin initialization.
-    raspi.init(() => {
-        const PIN_R = new pwm.SoftPWM({
-            pin: GPIO_RED,
-            frequency: PWM_FREQ
-        });
-        const PIN_G = new pwm.SoftPWM({
-            pin: GPIO_GREEN,
-            frequency: PWM_FREQ
-        });
-        const PIN_B = new pwm.SoftPWM({
-            pin: GPIO_BLUE,
-            frequency: PWM_FREQ
-        });
-
-        // v0.on('write', (param) => {
-        //   let r = intPWMToPercent(parseInt(param[0], 10));
-        //   let g = intPWMToPercent(parseInt(param[1], 10));
-        //   let b = intPWMToPercent(parseInt(param[2], 10));
-        //   PIN_R.write(r);
-        //   PIN_G.write(g);
-        //   PIN_B.write(b);
-        // });
-
-        vPinHue.on('write', (param) => {
-            table.setCurrentH(parseInt(param, 10));
-            // updateColor();
-        });
-        vPinSaturation.on('write', (param) => {
-            table.setCurrentS(parseFloat(param));
-            // updateColor();
-        });
-        vPinValue.on('write', (param) => {
-            table.setCurrentV(parseFloat(param));
-            // updateColor();
-        });
-
-        vPinAddColor.on('write', (param) => {
-            let value = parseInt(param, 10);
-            if (value === 1) {
-                debug.d("Add color pressed");
-
-                table.addRow();
-            }
-        });
-        vPinRemoveColor.on('write', (param) => {
-            let value = parseInt(param, 10);
-            if (value === 1) {
-                debug.d("Remove color pressed");
-
-                table.removeSelectedRows();
-            }
-        });
-
-        /**
-         * Updates the states of the GPIO pins to correspond to the current
-         * color.
-         */
-        function updateColor(hsv) {
-            // let hsv = table.getCurrentHsv();
-            let rgb = colors.hsvToRgb(hsv.h, hsv.s, hsv.v);
-
-            PIN_R.write(rgb.r);
-            PIN_G.write(rgb.g);
-            PIN_B.write(rgb.b);
-        }
-
-        table.addUpdateCurrentRowListener((hsv) => {
-            updateColor(hsv);
-        });
+    vPinHue.on('write', (param) => {
+        table.setCurrentH(parseInt(param, 10));
+        // updateColor();
     });
+    vPinSaturation.on('write', (param) => {
+        table.setCurrentS(parseFloat(param));
+        // updateColor();
+    });
+    vPinValue.on('write', (param) => {
+        table.setCurrentV(parseFloat(param));
+        // updateColor();
+    });
+
+    vPinAddColor.on('write', (param) => {
+        let value = parseInt(param, 10);
+        if (value === 1) {
+            debug.d("Add color pressed");
+
+            table.addRow();
+        }
+    });
+    vPinRemoveColor.on('write', (param) => {
+        let value = parseInt(param, 10);
+        if (value === 1) {
+            debug.d("Remove color pressed");
+
+            table.removeSelectedRows();
+        }
+    });
+
+
+    // Start a new process for led control.
+    let ledColorWorker = new Worker("./components/ledColorWorker.js");
+    ledColorWorker.onmessage = (event) => {
+        debug.d("Received message: " + JSON.stringify(event));
+
+        switch (event.data.message) {
+            case ledMessages.UPDATE_COLORS:
+                passColorsToColorWorker();
+                break;
+        }
+    };
+
+    table.addUpdateCurrentRowListener((hsv) => {
+        passColorsToColorWorker();
+    });
+
+    function passColorsToColorWorker() {
+        debug.d("Getting colors from table...");
+
+        let colorData = table.getTableData();
+        ledColorWorker.postMessage({
+            message: ledMessages.UPDATE_COLORS,
+            colorData: colorData
+        });
+
+        debug.d("Colors passed to LedWorker: " + JSON.stringify(colorData));
+    }
 });
 
 

@@ -1,7 +1,8 @@
 const colors = require('./colors');
-const debug = require('./debug');
+const Debug = require('./debug');
 
-debug.isDebug = true;
+const debug = new Debug();
+debug.isDebug = false;
 
 
 /**
@@ -196,6 +197,15 @@ let Table = function(blynk, vPinWidgetTable, vPinHue, vPinSat, vPinVal) {
         blynk.setProperty(this.vPinHue.pin, "color", colors.rgbToHexString(hueColor.r, hueColor.g, hueColor.b));
         blynk.setProperty(this.vPinSaturation.pin, "color", colors.rgbToHexString(satColor.r, satColor.g, satColor.b));
         blynk.setProperty(this.vPinValue.pin, "color", colors.rgbToHexString(hsv.v, hsv.v, hsv.v));
+    };
+
+    /**
+     * Returns the data currently on this table.
+     *
+     * @returns {[{id: Number, hsv: {h: Number, s: Number, v: Number}}]} current data on this table.
+     */
+    this.getTableData = () => {
+        return JSON.parse(JSON.stringify(this.state.table));
     };
 
     /**

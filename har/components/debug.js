@@ -1,10 +1,13 @@
 const FORCE_DEBUG = false;
 
-function debug(message, ...optionalParams) {
-    if (module.exports.isDebug || FORCE_DEBUG) {
-        console.log("DEBUG: " + message, ...optionalParams);
+function Debug() {
+    this.isDebug = false;
+
+    this.d = (message, ...optionalParams) => {
+        if (this.isDebug || FORCE_DEBUG) {
+            console.log("DEBUG: " + message, ...optionalParams);
+        }
     }
 }
 
-module.exports.d = debug;
-module.exports.isDebug = false;
+module.exports = Debug;
