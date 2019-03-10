@@ -2,7 +2,7 @@
   "name": "led-controller",
   "version": "0.1.0",
   "description": "A simple led controller for Raspberry Pi using Blynk",
-  "main": "ledController.js",
+  "main": "ledController",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
